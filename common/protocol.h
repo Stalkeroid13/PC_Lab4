@@ -1,0 +1,4 @@
+#ifndef PC_LAB4_PROTOCOL_H
+#define PC_LAB4_PROTOCOL_H
+
+#endif //PC_LAB4_PROTOCOL_H
