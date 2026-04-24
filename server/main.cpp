@@ -7,7 +7,21 @@ using namespace std;
 
 void handleClient(SOCKET client_socket)
 {
-    cout << "Thread " << this_thread::get_id() << " handling new client...\n";
+    PacketHeader ph;
+
+    int bytes_received = recv(client_socket, reinterpret_cast<char *>(&ph), sizeof(ph), 0);
+
+    if (bytes_received <= 0)
+    {
+        cerr << "Bytes receiving failed!\n";
+        return;
+    }
+
+    uint32_t cmd = ntohl(ph.commandId);
+    uint32_t size = ntohl(ph.payloadSize);
+    cout << "Received Command: " << cmd << " with size: " << size << endl;
+
+    closesocket(client_socket);
 }
 
 int main()
@@ -57,7 +71,6 @@ int main()
 
         // Створюємо новий потік для обслуговування клієнта
         // Використовуємо detach, щоб потік працював незалежно від main
-
         thread client_thread(handleClient, client_socket);
         client_thread.detach();
     }
