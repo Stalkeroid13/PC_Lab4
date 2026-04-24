@@ -3,6 +3,7 @@
 
 #include <winsock2.h>
 #include <cstdint>
+#include <vector>
 
 // Константи для команд
 enum class Command : uint32_t

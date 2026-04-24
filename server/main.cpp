@@ -1,6 +1,9 @@
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0602 // Вказуємо Windows 8 або вище
+#endif
+
 #include <iostream>
 #include <thread>
-#include <vector>
 #include "protocol.h"
 
 using namespace std;
@@ -18,24 +21,38 @@ void handleClient(SOCKET client_socket)
     }
 
     uint32_t cmd = ntohl(ph.commandId);
-    uint32_t size = ntohl(ph.payloadSize);
 
-    if (cmd == static_cast<uint32_t>(Command::SET_CONFIG) &&
-        size == sizeof(ConfigPayload))
+    if (cmd == static_cast<uint32_t>(Command::SEND_DATA))
     {
         ConfigPayload config;
-        // Читаємо дані конфігурації з сокета
-        int bytes = recv(client_socket, reinterpret_cast<char *>(&config), size, 0);
+        recv(client_socket, reinterpret_cast<char *>(&config), sizeof(config), 0);
 
-        if (bytes > 0)
+        uint32_t N = ntohl(config.matrixSize);
+        auto matrix_elements = static_cast<size_t>(N * N);
+        size_t matrix_bytes = matrix_elements * sizeof(long long);
+
+        // Виділяємо пам'ять під матрицю
+        vector<long long> matrix(matrix_elements);
+        auto ptr = (char *) matrix.data();
+
+        // Цикл викачування
+        size_t received_total = 0;
+        while (received_total < matrix_bytes)
         {
-            uint32_t N = ntohl(config.matrixSize);
-            uint32_t threads = ntohl(config.threadCount);
-            cout << "Config received: Matrix " << N << "x" << N << ", Threads: " << threads << endl;
+            int n = recv(client_socket, ptr + received_total, static_cast<int>(matrix_bytes - received_total), 0);
+            if (n <= 0)
+                break;
+            received_total += n;
         }
-    }
 
-    closesocket(client_socket);
+        // Перетворюємо числа назад у формат ПК
+        for (auto &element: matrix)
+            element = ntohll(element);
+
+        cout << "Successfully received matrix " << N << "x" << N << endl;
+
+        closesocket(client_socket);
+    }
 }
 
 int main()
