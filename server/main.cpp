@@ -7,7 +7,7 @@ using namespace std;
 
 void handleClient(SOCKET client_socket)
 {
-    PacketHeader ph;
+    PacketHeader ph{};
 
     int bytes_received = recv(client_socket, reinterpret_cast<char *>(&ph), sizeof(ph), 0);
 
@@ -19,7 +19,21 @@ void handleClient(SOCKET client_socket)
 
     uint32_t cmd = ntohl(ph.commandId);
     uint32_t size = ntohl(ph.payloadSize);
-    cout << "Received Command: " << cmd << " with size: " << size << endl;
+
+    if (cmd == static_cast<uint32_t>(Command::SET_CONFIG) &&
+        size == sizeof(ConfigPayload))
+    {
+        ConfigPayload config;
+        // Читаємо дані конфігурації з сокета
+        int bytes = recv(client_socket, reinterpret_cast<char *>(&config), size, 0);
+
+        if (bytes > 0)
+        {
+            uint32_t N = ntohl(config.matrixSize);
+            uint32_t threads = ntohl(config.threadCount);
+            cout << "Config received: Matrix " << N << "x" << N << ", Threads: " << threads << endl;
+        }
+    }
 
     closesocket(client_socket);
 }

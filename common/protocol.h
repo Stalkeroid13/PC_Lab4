@@ -21,6 +21,11 @@ struct PacketHeader
     uint32_t commandId;     // ID команди (з enum Command)
     uint32_t payloadSize;   // Розмір даних, що йдуть ПІСЛЯ цього заголовка
 };
+struct ConfigPayload
+{
+    uint32_t matrixSize;
+    uint32_t threadCount;
+};
 #pragma pack(pop)
 
 constexpr int DEFAULT_PORT = 7500;

@@ -31,14 +31,20 @@ int main()
         return 1;
     }
 
-    // Підготовка заголовка
+    // Готуємо дані конфігурації
+    ConfigPayload config;
+    config.matrixSize = htonl(1000);   // Наприклад, матриця 1000x1000
+    config.threadCount = htonl(12);
+
+    // Підготовка заголовка й даних
     PacketHeader ph;
     ph.commandId = htonl(static_cast<uint32_t>(Command::SET_CONFIG));
-    ph.payloadSize = htonl(0);
+    ph.payloadSize = htonl(sizeof(ConfigPayload));
 
-    // Відправка заголовка
+    // Відправка заголовка й усіх даних
     send(sock, reinterpret_cast<char *>(&ph), sizeof(ph), 0);
-    cout << "Header sent!\n";
+    send(sock, reinterpret_cast<char*>(&config), sizeof(config), 0);
+    cout << "Configuration sent!\n";
 
     closesocket(sock);
     WSACleanup();
