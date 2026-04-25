@@ -12,7 +12,7 @@ using namespace std;
 #include <future>
 
 // Паралельне обчислення добутків стовпців для побічної діагоналі
-void CountMatrix(vector<long long> &matrix, uint32_t N, uint32_t threadCount, atomic<bool>& stopFlag)
+void CountMatrix(vector<long long> &matrix, uint32_t N, uint32_t threadCount, atomic<bool> &stopFlag)
 {
     auto worker = [&](uint32_t startCol, uint32_t endCol)
     {
@@ -53,7 +53,7 @@ void handleClient(SOCKET client_socket)
     future<void> processingFuture;
 
     // Прапорець зупинки
-    auto stopFlag = make_shared<atomic<bool>>(false);
+    auto stopFlag = make_shared<atomic<bool> >(false);
 
     while (true)
     {
@@ -75,7 +75,8 @@ void handleClient(SOCKET client_socket)
             {
                 // Отримуємо конфігурацію
                 ConfigPayload config;
-                recv(client_socket, reinterpret_cast<char *>(&config), sizeof(config), 0);
+                if (recv(client_socket, reinterpret_cast<char *>(&config), sizeof(config), 0) <= 0)
+                    break;
                 N = ntohl(config.matrixSize);
                 threads = ntohl(config.threadCount);
 
