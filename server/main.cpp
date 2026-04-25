@@ -4,54 +4,145 @@
 
 #include <iostream>
 #include <thread>
+#include <atomic>
 #include "protocol.h"
 
 using namespace std;
 
-void handleClient(SOCKET client_socket)
+#include <future>
+
+// Паралельне обчислення добутків стовпців для побічної діагоналі
+void CountMatrix(vector<long long> &matrix, uint32_t N, uint32_t threadCount, atomic<bool>& stopFlag)
 {
-    PacketHeader ph{};
-
-    int bytes_received = recv(client_socket, reinterpret_cast<char *>(&ph), sizeof(ph), 0);
-
-    if (bytes_received <= 0)
+    auto worker = [&](uint32_t startCol, uint32_t endCol)
     {
-        cerr << "Bytes receiving failed!\n";
-        return;
+        for (uint32_t c = startCol; c < endCol; c++)
+        {
+            if (stopFlag.load())
+                return;
+
+            long long product = 1;
+            for (uint32_t r = 0; r < N; r++)
+                // Побічна діагональ знаходиться за індексом:
+                // row = N - 1 - col
+                if (r != (N - 1 - c))
+                    product *= matrix[r * N + c];
+            // Записуємо результат у побічну діагональ стовпця
+            matrix[(N - 1 - c) * N + c] = product;
+        }
+    };
+
+    vector<thread> threads;
+    uint32_t colsPerThread = N / threadCount;
+
+    for (uint32_t i = 0; i < threadCount; i++)
+    {
+        uint32_t start = i * colsPerThread;
+        uint32_t end = (i == threadCount - 1) ? N : (i + 1) * colsPerThread;
+        threads.emplace_back(worker, start, end);
     }
 
-    uint32_t cmd = ntohl(ph.commandId);
+    for (auto &t: threads)
+        t.join();
+}
 
-    if (cmd == static_cast<uint32_t>(Command::SEND_DATA))
+void handleClient(SOCKET client_socket)
+{
+    uint32_t N = 0, threads = 0;
+    vector<long long> matrix;
+    future<void> processingFuture;
+
+    // Прапорець зупинки
+    auto stopFlag = make_shared<atomic<bool>>(false);
+
+    while (true)
     {
-        ConfigPayload config;
-        recv(client_socket, reinterpret_cast<char *>(&config), sizeof(config), 0);
-
-        uint32_t N = ntohl(config.matrixSize);
-        auto matrix_elements = static_cast<size_t>(N * N);
-        size_t matrix_bytes = matrix_elements * sizeof(long long);
-
-        // Виділяємо пам'ять під матрицю
-        vector<long long> matrix(matrix_elements);
-        auto ptr = (char *) matrix.data();
-
-        // Цикл викачування
-        size_t received_total = 0;
-        while (received_total < matrix_bytes)
+        PacketHeader ph;
+        int hr = recv(client_socket, reinterpret_cast<char *>(&ph), sizeof(ph), 0);
+        if (hr <= 0)
         {
-            int n = recv(client_socket, ptr + received_total, static_cast<int>(matrix_bytes - received_total), 0);
-            if (n <= 0)
-                break;
-            received_total += n;
+            stopFlag->store(true);
+            cout << "Client disconnected. Ending tasks...\n";
+            break;
         }
 
-        // Перетворюємо числа назад у формат ПК
-        for (auto &element: matrix)
-            element = ntohll(element);
+        Command cmd = static_cast<Command>(ntohl(ph.commandId));
+        uint32_t payloadSize = ntohl(ph.payloadSize);
 
-        cout << "Successfully received matrix " << N << "x" << N << endl;
+        switch (cmd)
+        {
+            case Command::SEND_DATA:
+            {
+                // Отримуємо конфігурацію
+                ConfigPayload config;
+                recv(client_socket, reinterpret_cast<char *>(&config), sizeof(config), 0);
+                N = ntohl(config.matrixSize);
+                threads = ntohl(config.threadCount);
 
-        closesocket(client_socket);
+                // Викачуємо матрицю
+                auto elements = (size_t) (N * N);
+                matrix.assign(elements, 0);
+                auto ptr = reinterpret_cast<char *>(matrix.data());
+                size_t total = 0;
+                size_t target = elements * sizeof(long long);
+
+                while (total < target)
+                {
+                    int r = recv(client_socket, ptr + total, static_cast<int>(target - total), 0);
+                    if (r <= 0)
+                        break;
+                    total += r;
+                }
+
+                for (auto &el: matrix)
+                    el = ntohll(el);
+                cout << "Matrix " << N << "x" << N << " received!\n";
+
+                break;
+            }
+            case Command::START_PROCESSING:
+            {
+                if (matrix.empty())
+                    break;
+                if (processingFuture.valid() && processingFuture.wait_for(0s) != future_status::ready)
+                    break;
+                *stopFlag = false;
+
+                // Запускаємо обчислення асинхронно через async
+                processingFuture = async(launch::async, CountMatrix, ref(matrix), N, threads, ref(*stopFlag));
+                cout << "Processing started...\n";
+
+                break;
+            }
+            case Command::GET_STATUS:
+            {
+                // Перевіряємо статус через future без блокування
+                bool done = processingFuture.valid() &&
+                            processingFuture.wait_for(chrono::seconds(0)) == future_status::ready;
+
+                uint32_t status = done ? 1 : 0;
+                uint32_t netStatus = htonl(status);
+                send(client_socket, reinterpret_cast<char *>(&netStatus), sizeof(netStatus), 0);
+
+                break;
+            }
+            case Command::GET_RESULT:
+            {
+                // Чекаємо фінального завершення, якщо ще не готово
+                if (processingFuture.valid())
+                    processingFuture.get();
+
+                // Відправляємо матрицю назад клієнту
+                for (auto &el: matrix)
+                    el = htonll(el);
+                send(client_socket, reinterpret_cast<char *>(matrix.data()),
+                     static_cast<int>(matrix.size() * sizeof(long long)), 0);
+                cout << "Result sent to client!\n";
+
+                break;
+            }
+            default: ;
+        }
     }
 }
 
